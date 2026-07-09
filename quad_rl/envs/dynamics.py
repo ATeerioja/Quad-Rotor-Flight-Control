@@ -88,8 +88,12 @@ def quat_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
     ])
 
 
-def _quat_to_rotmat(q: np.ndarray) -> np.ndarray:
-    """Body -> world rotation matrix for scalar-first quaternion q."""
+def quat_to_rotmat(q: np.ndarray) -> np.ndarray:
+    """Body -> world rotation matrix for scalar-first quaternion q.
+
+    Public: also used by quad_hover_env.py for the 6D rotation
+    observation and the upright-tilt crash check.
+    """
     w, x, y, z = q
     # scipy uses scalar-last [x, y, z, w] quaternions.
     return Rotation.from_quat([x, y, z, w]).as_matrix()
@@ -122,7 +126,7 @@ def _state_derivative(state: np.ndarray, action: np.ndarray, params: dict) -> np
     gravity = params["gravity"]
     drag = params["drag_coefficient"]
 
-    rotmat = _quat_to_rotmat(quat)
+    rotmat = quat_to_rotmat(quat)
     thrust_world = rotmat @ np.array([0.0, 0.0, total_thrust])
     gravity_world = np.array([0.0, 0.0, -gravity])
 

@@ -3,8 +3,15 @@ Using RL for Quadcopter flight control. Iterative approach with my own implement
 
 ## Status
 
-Stage 0.1: project scaffolding only. The custom physics model, Gym
-environment, and PPO training loop are not implemented yet.
+**Stage 0: complete.** A custom 6-DOF rigid-body quadrotor dynamics model
+(quaternion state, RK4 integration) is wrapped in a Gymnasium hover-task
+environment, and a PPO baseline demonstrably learns to hover: it converges
+to within ~1cm of the target position and holds it, with smooth
+(non-bang-bang) motor commands and a plateaued reward curve. See
+[prompts/Stage0 prompts](prompts/Stage0%20prompts) for the stage roadmap
+and [DEVELOPER.md](DEVELOPER.md) for commands and technical details.
+
+Next: Stage 1 (reward shaping refinements, wind disturbance, sensor noise).
 
 ## Project structure
 
@@ -12,12 +19,12 @@ environment, and PPO training loop are not implemented yet.
 quad_rl/
   envs/
     dynamics.py        # rigid-body equations of motion, RK4 integrator
-    quad_hover_env.py  # Gymnasium Env wrapping dynamics.py
+    quad_hover_env.py  # Gymnasium Env wrapping dynamics.py, registers "QuadHover-v0"
     configs/
       default.yaml      # physical parameters, reward weights, episode limits
   training/
     train_ppo.py         # Stable-Baselines3 PPO training script
-    eval_rollout.py       # runs a trained policy, logs/plots a trajectory
+    eval_rollout.py       # runs a trained policy, plots a trajectory
   tests/
     test_dynamics.py       # pytest suite for the physics model
 requirements.txt
@@ -39,8 +46,20 @@ Verify the install:
 python -c "import gymnasium, stable_baselines3; print(gymnasium.__version__, stable_baselines3.__version__)"
 ```
 
-Run the (currently empty) test suite:
+## Quick start
 
 ```bash
-pytest quad_rl/tests/
+# Physics unit tests
+pytest quad_rl/tests/ -v
+
+# Train (see DEVELOPER.md for all options and hyperparameter notes)
+python -m quad_rl.training.train_ppo --total-timesteps 3000000 --run-name my_run
+
+# Watch progress
+tensorboard --logdir runs/tensorboard
+
+# Evaluate a checkpoint and plot a rollout
+python -m quad_rl.training.eval_rollout --checkpoint runs/my_run/final_model.zip
 ```
+
+For the full command reference, config file layout, and project conventions, see [DEVELOPER.md](DEVELOPER.md).

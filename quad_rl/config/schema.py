@@ -246,6 +246,39 @@ class DisturbanceConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class RandomizationConfig:
+    """Dotted-path -> distribution spec for per-episode physics parameter
+    sampling, e.g. {"mass": {"type": "uniform", "lo": 0.4, "hi": 0.6},
+    "inertia.ixx": {"type": "log_uniform", "lo": 0.001, "hi": 0.005}}. Only
+    shallowly validated here (each entry must be a dict with a "type" key)
+    -- deeper validation happens when quad_rl.envs.randomization builds
+    concrete Distribution instances via DISTRIBUTION_REGISTRY. An empty
+    spec ({}) is a no-op -- exactly Stage 1's setting."""
+
+    spec: dict[str, dict]
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "RandomizationConfig":
+        known = {"spec"}
+        unknown = set(data) - known
+        if unknown:
+            raise ValueError(f"RandomizationConfig: unknown key(s): {sorted(unknown)}")
+        if "spec" not in data:
+            raise ValueError("RandomizationConfig: missing required key(s): ['spec']")
+
+        spec = data["spec"]
+        if not isinstance(spec, dict):
+            raise ValueError("RandomizationConfig.spec: expected a dict")
+        for path, dist_cfg in spec.items():
+            if not isinstance(dist_cfg, dict) or "type" not in dist_cfg:
+                raise ValueError(f"RandomizationConfig.spec[{path!r}]: must be a dict with a 'type' key")
+        return cls(spec={path: dict(dist_cfg) for path, dist_cfg in spec.items()})
+
+    def asdict(self) -> dict:
+        return {"spec": {path: dict(dist_cfg) for path, dist_cfg in self.spec.items()}}
+
+
+@dataclasses.dataclass(frozen=True)
 class EnvConfig:
     physics: PhysicsConfig
     simulation: SimConfig
@@ -253,16 +286,25 @@ class EnvConfig:
     reward: RewardConfig
     spawn: SpawnConfig
     disturbance: DisturbanceConfig
+    randomization: RandomizationConfig
+    expose_privileged: bool
 
     @classmethod
     def from_dict(cls, data: dict) -> "EnvConfig":
-        known = {"physics", "simulation", "episode", "reward", "spawn", "disturbance"}
+        known = {
+            "physics", "simulation", "episode", "reward", "spawn",
+            "disturbance", "randomization", "expose_privileged",
+        }
         unknown = set(data) - known
         if unknown:
             raise ValueError(f"EnvConfig: unknown top-level key(s): {sorted(unknown)}")
         missing = known - set(data)
         if missing:
             raise ValueError(f"EnvConfig: missing required top-level key(s): {sorted(missing)}")
+        if not isinstance(data["expose_privileged"], bool):
+            raise ValueError(
+                f"EnvConfig.expose_privileged: expected bool, got {type(data['expose_privileged']).__name__}"
+            )
         return cls(
             physics=PhysicsConfig.from_dict(data["physics"]),
             simulation=SimConfig.from_dict(data["simulation"]),
@@ -270,6 +312,8 @@ class EnvConfig:
             reward=RewardConfig.from_dict(data["reward"]),
             spawn=SpawnConfig.from_dict(data["spawn"]),
             disturbance=DisturbanceConfig.from_dict(data["disturbance"]),
+            randomization=RandomizationConfig.from_dict(data["randomization"]),
+            expose_privileged=data["expose_privileged"],
         )
 
     def asdict(self) -> dict:
@@ -283,4 +327,6 @@ class EnvConfig:
             "reward": self.reward.asdict(),
             "spawn": self.spawn.asdict(),
             "disturbance": self.disturbance.asdict(),
+            "randomization": self.randomization.asdict(),
+            "expose_privileged": self.expose_privileged,
         }

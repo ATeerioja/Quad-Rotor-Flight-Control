@@ -32,3 +32,14 @@ disturbance:
     type: none
   observation:
     type: none
+
+# No per-episode parameter randomization yet -- an empty spec is a no-op,
+# every episode uses physics's nominal values exactly (Stage 1.4 builds
+# the seam; Stage 2/3 turn it on).
+randomization:
+  spec: {}
+
+# Stage 1.4's domain-adaptation hook: when true, observation_space becomes
+# a Dict with a "privileged_obs" key carrying the sampled physics
+# parameters. False here so SB3's MlpPolicy keeps working untouched.
+expose_privileged: false

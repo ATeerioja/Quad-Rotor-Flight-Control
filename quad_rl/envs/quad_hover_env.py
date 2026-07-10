@@ -23,9 +23,9 @@ layer, will depend on it):
     previous action                (4)  -- already in [-1, 1], the action space itself
 
 reset(): spawns near a randomly sampled target position, with small
-random position/velocity/orientation perturbation (not domain
-randomization yet -- just enough variety that the policy can't memorize
-a single trajectory).
+random position/velocity/orientation perturbation (spawn variety only --
+physics parameter randomization is a separate seam, see
+quad_rl.envs.randomization.ParameterSampler).
 
 Episode length: capped at max_steps (default 1000, i.e. 10 s at 100 Hz)
 as a timeout (truncation), tracked internally so the cap holds even for
@@ -44,6 +44,7 @@ from scipy.spatial.transform import Rotation
 from quad_rl.config.loader import load_config
 from quad_rl.envs import dynamics
 from quad_rl.envs.disturbances import build_force_disturbance, build_observation_noise
+from quad_rl.envs.randomization import PHYSICS_PARAM_NAMES, ParameterSampler, physics_config_to_vector
 from quad_rl.envs.rewards import HoverBonus, RewardFunction, StepContext
 
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "configs" / "default.yaml"
@@ -77,11 +78,19 @@ class QuadHoverEnv(gym.Env):
 
         self.env_config = load_config(config_path or DEFAULT_CONFIG_PATH, overrides=overrides)
 
-        # Cached separately from env_config (rather than read through it
-        # each call) since these are read on every dynamics.step() call, in
-        # the hot per-step path.
-        self.physics_params = self.env_config.physics.as_params()
         self.dt = self.env_config.simulation.dt
+
+        # physics_config/physics_params are placeholders here (nominal
+        # values) -- reset() resamples them every episode via
+        # parameter_sampler. Cached as plain attributes (rather than read
+        # through env_config each call) since they're read on every
+        # dynamics.step() call, in the hot per-step path.
+        self.parameter_sampler = ParameterSampler.from_config(
+            self.env_config.randomization, self.env_config.physics
+        )
+        self.physics_config = self.env_config.physics
+        self.physics_params = self.physics_config.as_params()
+        self._physics_param_vector = physics_config_to_vector(self.physics_config).astype(np.float32)
 
         self.reward_function = RewardFunction.from_config(self.env_config.reward)
         # within_hover_threshold is a general diagnostic (read by
@@ -97,7 +106,23 @@ class QuadHoverEnv(gym.Env):
         self.observation_noise = build_observation_noise(self.env_config.disturbance.observation)
 
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(dynamics.ACTION_DIM,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(OBS_DIM,), dtype=np.float32)
+
+        # expose_privileged is a static, construction-time setting (not
+        # something that changes per-episode), so SB3's MlpPolicy vs.
+        # MultiInputPolicy selection can be driven by this observation_space
+        # shape alone -- when false, this is a plain Box exactly as before
+        # this feature existed.
+        self.expose_privileged = self.env_config.expose_privileged
+        plain_obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(OBS_DIM,), dtype=np.float32)
+        if self.expose_privileged:
+            self.observation_space = spaces.Dict({
+                "observation": plain_obs_space,
+                "privileged_obs": spaces.Box(
+                    low=-np.inf, high=np.inf, shape=(len(PHYSICS_PARAM_NAMES),), dtype=np.float32
+                ),
+            })
+        else:
+            self.observation_space = plain_obs_space
 
         self.state = np.zeros(dynamics.STATE_DIM)
         self.target = np.zeros(3)
@@ -106,6 +131,12 @@ class QuadHoverEnv(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
+
+        # Resampled every episode; with an empty (or all-Fixed-at-nominal)
+        # randomization spec this is a no-op, exactly Stage 1's setting.
+        self.physics_config = self.parameter_sampler.sample(self.np_random)
+        self.physics_params = self.physics_config.as_params()
+        self._physics_param_vector = physics_config_to_vector(self.physics_config).astype(np.float32)
 
         spawn_cfg = self.env_config.spawn
         self.target = np.array([0.0, 0.0, TARGET_ALTITUDE]) + self.np_random.uniform(
@@ -140,7 +171,11 @@ class QuadHoverEnv(gym.Env):
         self.force_disturbance = build_force_disturbance(self.env_config.disturbance.force)
         self.observation_noise = build_observation_noise(self.env_config.disturbance.observation)
 
-        return self._get_obs(), {}
+        info = {
+            "physics_params": self._physics_param_vector,
+            "physics_param_names": PHYSICS_PARAM_NAMES,
+        }
+        return self._make_observation(), info
 
     def step(self, action: np.ndarray):
         action = np.clip(np.asarray(action, dtype=float), -1.0, 1.0)
@@ -190,8 +225,9 @@ class QuadHoverEnv(gym.Env):
         info = {
             "within_hover_threshold": within_hover_threshold,
             "reward_components": reward_components,
+            "physics_params": self._physics_param_vector,
         }
-        return self._get_obs(), reward, terminated, truncated, info
+        return self._make_observation(), reward, terminated, truncated, info
 
     def _check_crash(self) -> bool:
         episode_cfg = self.env_config.episode
@@ -224,6 +260,12 @@ class QuadHoverEnv(gym.Env):
             self.prev_action,
         ])
         return self.observation_noise.apply(obs, self.np_random).astype(np.float32, copy=False)
+
+    def _make_observation(self) -> np.ndarray | dict:
+        plain_obs = self._get_obs()
+        if not self.expose_privileged:
+            return plain_obs
+        return {"observation": plain_obs, "privileged_obs": self._physics_param_vector}
 
 
 gym.register(

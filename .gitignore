@@ -222,3 +222,4 @@ __marimo__/
 
 # Claude Code prompts
 prompts/
+.calude

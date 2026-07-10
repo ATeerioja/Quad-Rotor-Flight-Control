@@ -1,6 +1,12 @@
 # Quad-Rotor-Flight-Control
 Using RL for Quadcopter flight control. Iterative approach with my own implementation of a MDP.
 
+![A trained PPO policy recovering from an off-center spawn to hover at its target](docs/assets/hover_demo.gif)
+
+*A trained PPO policy recovering from an off-center spawn and settling into
+hover, rendered with `viz/generate_animation.py` — see
+[docs/trajectory_visualization.md](docs/trajectory_visualization.md).*
+
 ## Status
 
 **Stage 0: complete.** A custom 6-DOF rigid-body quadrotor dynamics model
@@ -89,8 +95,15 @@ quad_rl/
     test_config.py, test_dynamics.py, test_rewards.py, test_disturbances.py,
     test_randomization.py, test_env.py, test_algorithms.py, test_train.py,
     test_evaluate.py
+viz/
+  recorder.py            # TrajectoryRecorder(gym.Wrapper): logs position/quaternion/time to .npz
+  animate.py              # python -m viz.animate: renders a .npz to a 3D .mp4/.gif animation
+  generate_animation.py    # python -m viz.generate_animation: record + render in one command
+  tests/
+    test_recorder.py
 docs/
   domain_adaptation.md   # RMA / randomization-only / system-ID sketch (Stage 1.4)
+  trajectory_visualization.md   # how to record + render + view a 3D rollout animation
 requirements.txt
 ```
 
@@ -125,7 +138,13 @@ tensorboard --logdir runs/tensorboard
 # Evaluate a checkpoint over N episodes (--algo is read back from the run's
 # own config.yaml automatically -- no need to pass it again)
 python -m quad_rl.training.evaluate --checkpoint runs/my_run/final_model.zip --n-episodes 20
+
+# Visualize a rollout in 3D -- record + render in one command
+# (see docs/trajectory_visualization.md)
+python -m viz.generate_animation --out rollout.mp4
 ```
 
 For the full command reference, config file layout, the reward/disturbance/
 algorithm registries, and project conventions, see [DEVELOPER.md](DEVELOPER.md).
+For recording and rendering a 3D rollout animation, see
+[docs/trajectory_visualization.md](docs/trajectory_visualization.md).

@@ -193,6 +193,46 @@ still works (same flags as before Stage 1.7) — a thin shim forwarding to
 `config.yaml`, so it always falls back to `ppo` rather than reading it
 back). Prefer `evaluate.py` directly for anything new.
 
+### Visualize a rollout in 3D
+
+`viz/` is a separate, offline package — it never touches `quad_hover_env.py`
+or `dynamics.py`, and nothing under `quad_rl/training/` imports it.
+
+The quickest path is `viz/generate_animation.py`, which records a rollout
+(random actions, or a trained checkpoint via `--checkpoint`) and renders it
+in one command:
+
+```bash
+python -m viz.generate_animation --out rollout.mp4
+python -m viz.generate_animation --out rollout.mp4 \
+    --checkpoint runs/my_run/final_model.zip \
+    --vecnormalize runs/my_run/final_vecnormalize.pkl --algo ppo
+```
+
+To record manually instead (e.g. a custom policy loop), wrap a manual eval
+loop (not a training env) in `viz.recorder.TrajectoryRecorder`, then render
+the saved `.npz` with `viz/animate.py` directly:
+
+```bash
+python -m viz.animate --file rollout.npz --out rollout.mp4
+```
+
+Options (`python -m viz.animate --help`):
+
+| flag | default | meaning |
+|---|---|---|
+| `--file` | *required* | input `.npz` from `TrajectoryRecorder.save()` |
+| `--out` | *required* | `.mp4` (ffmpeg writer) or `.gif` (pillow writer), inferred from the suffix |
+| `--trail` | 50 | number of past positions in the fading trail |
+| `--fps` | 30 | output frame rate |
+| `--arm-length` | 0.17 | visual arm length (m); the `.npz` has no physics params, so this is a rendering constant, not read from config |
+| `--writer` | inferred | force `ffmpeg` or `pillow` instead of inferring from `--out` |
+
+`.mp4` needs a system `ffmpeg` binary on `PATH`; `.gif` works out of the
+box via matplotlib's bundled `pillow` writer. See
+[docs/trajectory_visualization.md](docs/trajectory_visualization.md) for
+the recording example, the `.npz` schema, and how to view the output.
+
 ## Config
 
 Config is hierarchical and validated (`quad_rl/config/`), not a single

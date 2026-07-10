@@ -237,14 +237,18 @@ class QuadHoverEnv(gym.Env):
 
         self._history.append(self._get_obs())
 
-        # Exposed for training/eval tooling: train_ppo.py's custom TensorBoard
-        # metric averages "within_hover_threshold" over each episode, and
-        # eval_rollout.py plots "reward_components" without needing to
-        # duplicate the formula above.
+        # Exposed for training/eval tooling: train.py's custom TensorBoard
+        # callbacks average "within_hover_threshold" and "pos_error_norm"
+        # over each episode, and eval_rollout.py plots "reward_components"
+        # without needing to duplicate the formula above. pos_error_norm is
+        # exposed directly (raw meters) rather than requiring callers to
+        # reverse-engineer it from a reward-term weight or from a scaled/
+        # possibly-stacked observation.
         info = {
             "within_hover_threshold": within_hover_threshold,
             "reward_components": reward_components,
             "physics_params": self._physics_param_vector,
+            "pos_error_norm": pos_error_norm,
         }
         return self._make_observation(), reward, terminated, truncated, info
 

@@ -1,0 +1,30 @@
+# Hyperparameters, chosen for a small continuous-control problem
+# (19-dim obs, 4-dim action, 1000-step episodes at 100 Hz) rather
+# than left at SB3's defaults (which are tuned more toward Atari).
+learning_rate: 0.0003   # the standard Adam starting point for PPO on
+                        # continuous-control tasks (used across the
+                        # original PPO paper and most SB3-zoo continuous-
+                        # control configs); revisit with a linear decay
+                        # schedule once a longer run needs the extra
+                        # stability late in training.
+n_steps: 2048           # per env: with n_envs=8 that's a 16384-step
+                        # rollout buffer per update, long enough to span
+                        # several full hover episodes and give GAE a
+                        # stable advantage estimate before each policy
+                        # update, in line with SB3-zoo's continuous-
+                        # control (MuJoCo) defaults rather than its short
+                        # discrete-action ones.
+batch_size: 256         # divides the 16384-step buffer into 64
+                        # minibatches per epoch -- small enough for
+                        # frequent, low-variance gradient steps, large
+                        # enough to keep the GPU/CPU batched efficiently;
+                        # a common middle ground in continuous-control
+                        # PPO configs (SB3's own 64 default is tuned for
+                        # smaller buffers).
+n_epochs: 10
+gamma: 0.99
+gae_lambda: 0.95
+clip_range: 0.2
+ent_coef: 0.0
+vf_coef: 0.5
+max_grad_norm: 0.5

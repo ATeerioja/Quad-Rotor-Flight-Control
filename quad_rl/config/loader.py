@@ -1,8 +1,11 @@
 """Hierarchical, overridable YAML config loading.
 
-load_config(path, overrides) is the entry point most callers need;
-_deep_merge and _read_yaml_with_defaults are exposed for direct testing of
-the merge algorithm in isolation from schema validation.
+load_config(path, overrides) is the entry point most callers need. Its
+schema-free half -- load_raw_config / apply_overrides -- is also reused
+directly by quad_rl.training.algorithms for algo hyperparameter YAMLs,
+which have no single shared schema across ppo/sac/td3 the way EnvConfig
+does for the env. _deep_merge and _read_yaml_with_defaults are exposed for
+direct testing of the merge algorithm in isolation from schema validation.
 """
 
 from __future__ import annotations
@@ -73,9 +76,24 @@ def _apply_override(config: dict, key_path: list[str], value: object) -> None:
     node[key_path[-1]] = value
 
 
-def load_config(path: str | Path, overrides: list[str] | None = None) -> EnvConfig:
-    merged = _read_yaml_with_defaults(Path(path))
+def apply_overrides(config: dict, overrides: list[str] | None) -> dict:
+    """Apply dotted key=value overrides to an already-loaded config dict,
+    returning a new dict (does not mutate the input). Split out from
+    load_raw_config so overrides can also be applied on top of a dict that
+    didn't come from a fresh file load, e.g. AlgoSpec.default_hyperparams."""
+    result = copy.deepcopy(config)
     for item in overrides or []:
         key_path, value = _parse_override(item)
-        _apply_override(merged, key_path, value)
-    return EnvConfig.from_dict(merged)
+        _apply_override(result, key_path, value)
+    return result
+
+
+def load_raw_config(path: str | Path, overrides: list[str] | None = None) -> dict:
+    """Resolve a YAML file's `defaults:` chain and apply dotted overrides,
+    returning the merged nested dict with no schema imposed."""
+    merged = _read_yaml_with_defaults(Path(path))
+    return apply_overrides(merged, overrides)
+
+
+def load_config(path: str | Path, overrides: list[str] | None = None) -> EnvConfig:
+    return EnvConfig.from_dict(load_raw_config(path, overrides))

@@ -1,0 +1,15 @@
+# SAC hyperparameters for QuadHover-v0 -- mostly SB3/stock defaults for a
+# small continuous-control problem, not yet tuned specifically for this
+# task (Stage 1 just needs this algorithm to train without error; Stage 2+
+# is where hyperparameter tuning across algorithms would happen).
+learning_rate: 0.0003
+buffer_size: 100000
+batch_size: 256
+train_freq: 1        # off-policy: update after every env step by default
+gradient_steps: 1    # (see quad_rl.training.algorithms._off_policy_kwargs
+                      # for how a shared "n_steps"-style override, if
+                      # given, is translated into train_freq/gradient_steps
+                      # instead of being silently ignored)
+tau: 0.005
+gamma: 0.99
+ent_coef: auto        # SAC's automatic entropy-coefficient tuning

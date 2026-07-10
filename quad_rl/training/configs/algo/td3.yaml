@@ -1,0 +1,13 @@
+# TD3 hyperparameters for QuadHover-v0 -- mostly SB3 stock defaults, not
+# yet tuned specifically for this task (Stage 1 just needs this algorithm
+# to train without error).
+learning_rate: 0.001
+buffer_size: 100000
+batch_size: 256
+train_freq: 1
+gradient_steps: 1
+tau: 0.005
+gamma: 0.99
+policy_delay: 2
+target_policy_noise: 0.2
+target_noise_clip: 0.5

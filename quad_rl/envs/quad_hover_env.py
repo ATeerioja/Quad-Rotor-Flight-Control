@@ -38,10 +38,10 @@ from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
-import yaml
 from gymnasium import spaces
 from scipy.spatial.transform import Rotation
 
+from quad_rl.config.loader import load_config
 from quad_rl.envs import dynamics
 
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "configs" / "default.yaml"
@@ -62,62 +62,24 @@ ANGULAR_VELOCITY_SCALE = 5.0  # rad/s
 TARGET_ALTITUDE = 1.5  # m
 
 
-def _load_config(config_path: Path) -> dict:
-    with open(config_path) as f:
-        return yaml.safe_load(f)
-
-
-def _physics_params_from_config(config: dict) -> dict:
-    """Bridge default.yaml's nested physics section into the flat params
-    dict dynamics.step() expects (see dynamics.py's module docstring)."""
-    phys = config["physics"]
-    return {
-        "mass": phys["mass"],
-        "inertia": np.array(
-            [phys["inertia"]["ixx"], phys["inertia"]["iyy"], phys["inertia"]["izz"]]
-        ),
-        "arm_length": phys["arm_length"],
-        "thrust_coefficient": phys["thrust_coefficient"],
-        "drag_coefficient": phys["drag_coefficient"],
-        "yaw_torque_coefficient": phys["yaw_torque_coefficient"],
-        "gravity": phys["gravity"],
-        "motor_time_constant": phys["motor_time_constant"],
-    }
-
-
 class QuadHoverEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, config_path: str | Path | None = None, render_mode: str | None = None):
+    def __init__(
+        self,
+        config_path: str | Path | None = None,
+        overrides: list[str] | None = None,
+        render_mode: str | None = None,
+    ):
         self.render_mode = render_mode
 
-        config = _load_config(config_path or DEFAULT_CONFIG_PATH)
-        self.physics_params = _physics_params_from_config(config)
-        self.dt = config["simulation"]["dt"]
+        self.env_config = load_config(config_path or DEFAULT_CONFIG_PATH, overrides=overrides)
 
-        episode_cfg = config["episode"]
-        self.max_steps = episode_cfg["max_steps"]
-        self.crash_altitude = episode_cfg["crash_altitude"]
-        self.max_tilt_deg = episode_cfg["max_tilt_deg"]
-        self.bounding_box = episode_cfg["bounding_box"]
-
-        # Reward weights, named here rather than buried in _compute_reward's
-        # arithmetic, and read from default.yaml so they stay tunable
-        # without touching code.
-        reward_cfg = config["reward"]
-        self.w_position = reward_cfg["position_error_weight"]
-        self.w_angular_velocity = reward_cfg["angular_velocity_weight"]
-        self.w_action = reward_cfg["action_magnitude_weight"]
-        self.w_action_rate = reward_cfg["action_rate_weight"]
-        self.hover_bonus = reward_cfg["hover_bonus"]
-        self.hover_threshold = reward_cfg["hover_threshold"]
-        self.crash_penalty = reward_cfg["crash_penalty"]
-
-        spawn_cfg = config["spawn"]
-        self.position_perturbation = spawn_cfg["position_perturbation"]
-        self.velocity_perturbation = spawn_cfg["velocity_perturbation"]
-        self.orientation_perturbation_deg = spawn_cfg["orientation_perturbation_deg"]
-        self.target_region = spawn_cfg["target_region"]
+        # Cached separately from env_config (rather than read through it
+        # each call) since these are read on every dynamics.step() call, in
+        # the hot per-step path.
+        self.physics_params = self.env_config.physics.as_params()
+        self.dt = self.env_config.simulation.dt
 
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(dynamics.ACTION_DIM,), dtype=np.float32)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(OBS_DIM,), dtype=np.float32)
@@ -130,22 +92,23 @@ class QuadHoverEnv(gym.Env):
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
 
+        spawn_cfg = self.env_config.spawn
         self.target = np.array([0.0, 0.0, TARGET_ALTITUDE]) + self.np_random.uniform(
-            -self.target_region, self.target_region, size=3
+            -spawn_cfg.target_region, spawn_cfg.target_region, size=3
         )
 
         state = np.zeros(dynamics.STATE_DIM)
         state[dynamics.POS] = self.target + self.np_random.uniform(
-            -self.position_perturbation, self.position_perturbation, size=3
+            -spawn_cfg.position_perturbation, spawn_cfg.position_perturbation, size=3
         )
         state[dynamics.VEL] = self.np_random.uniform(
-            -self.velocity_perturbation, self.velocity_perturbation, size=3
+            -spawn_cfg.velocity_perturbation, spawn_cfg.velocity_perturbation, size=3
         )
 
         axis = self.np_random.normal(size=3)
         axis = axis / np.linalg.norm(axis)
         angle_deg = self.np_random.uniform(
-            -self.orientation_perturbation_deg, self.orientation_perturbation_deg
+            -spawn_cfg.orientation_perturbation_deg, spawn_cfg.orientation_perturbation_deg
         )
         rotvec = axis * np.radians(angle_deg)
         x, y, z, w = Rotation.from_rotvec(rotvec).as_quat()
@@ -165,7 +128,7 @@ class QuadHoverEnv(gym.Env):
         self.elapsed_steps += 1
 
         pos_error_norm = float(np.linalg.norm(self.state[dynamics.POS] - self.target))
-        within_hover_threshold = pos_error_norm < self.hover_threshold
+        within_hover_threshold = pos_error_norm < self.env_config.reward.hover_threshold
 
         # reward_components always has the same keys regardless of crash,
         # so callers (e.g. eval_rollout.py) can stack a fixed set of series
@@ -173,14 +136,15 @@ class QuadHoverEnv(gym.Env):
         reward, reward_components = self._compute_reward(action, pos_error_norm)
         crashed = self._check_crash()
         if crashed:
-            reward = -self.crash_penalty
-            reward_components = {**{k: 0.0 for k in reward_components}, "crash_penalty": -self.crash_penalty}
+            crash_penalty = self.env_config.reward.crash_penalty
+            reward = -crash_penalty
+            reward_components = {**{k: 0.0 for k in reward_components}, "crash_penalty": -crash_penalty}
             terminated = True
         else:
             reward_components["crash_penalty"] = 0.0
             terminated = False
 
-        truncated = self.elapsed_steps >= self.max_steps
+        truncated = self.elapsed_steps >= self.env_config.episode.max_steps
         self.prev_action = action
 
         # Exposed for training/eval tooling: train_ppo.py's custom TensorBoard
@@ -195,27 +159,29 @@ class QuadHoverEnv(gym.Env):
 
     def _compute_reward(self, action: np.ndarray, pos_error_norm: float) -> tuple[float, dict]:
         omega = self.state[dynamics.OMEGA]
+        reward_cfg = self.env_config.reward
 
         components = {
-            "position": -self.w_position * pos_error_norm,
-            "angular_velocity": -self.w_angular_velocity * np.linalg.norm(omega),
-            "action_magnitude": -self.w_action * np.linalg.norm(action),
-            "action_rate": -self.w_action_rate * np.linalg.norm(action - self.prev_action),
-            "hover_bonus": self.hover_bonus if pos_error_norm < self.hover_threshold else 0.0,
+            "position": -reward_cfg.position_error_weight * pos_error_norm,
+            "angular_velocity": -reward_cfg.angular_velocity_weight * np.linalg.norm(omega),
+            "action_magnitude": -reward_cfg.action_magnitude_weight * np.linalg.norm(action),
+            "action_rate": -reward_cfg.action_rate_weight * np.linalg.norm(action - self.prev_action),
+            "hover_bonus": reward_cfg.hover_bonus if pos_error_norm < reward_cfg.hover_threshold else 0.0,
         }
         return sum(components.values()), components
 
     def _check_crash(self) -> bool:
+        episode_cfg = self.env_config.episode
         altitude = self.state[dynamics.POS][2]
-        if altitude < self.crash_altitude:
+        if altitude < episode_cfg.crash_altitude:
             return True
 
         rotmat = dynamics.quat_to_rotmat(self.state[dynamics.QUAT])
         tilt_deg = np.degrees(np.arccos(np.clip(rotmat[2, 2], -1.0, 1.0)))
-        if tilt_deg > self.max_tilt_deg:
+        if tilt_deg > episode_cfg.max_tilt_deg:
             return True
 
-        if np.any(np.abs(self.state[dynamics.POS]) > self.bounding_box):
+        if np.any(np.abs(self.state[dynamics.POS]) > episode_cfg.bounding_box):
             return True
 
         return False

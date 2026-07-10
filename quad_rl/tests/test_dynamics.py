@@ -23,40 +23,21 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import yaml
 
+from quad_rl.config.loader import load_config
 from quad_rl.envs import dynamics as dyn
 
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "envs" / "configs" / "default.yaml"
 
 
-def _load_params_and_dt():
-    with open(CONFIG_PATH) as f:
-        cfg = yaml.safe_load(f)
-    phys = cfg["physics"]
-    params = {
-        "mass": phys["mass"],
-        "inertia": np.array(
-            [phys["inertia"]["ixx"], phys["inertia"]["iyy"], phys["inertia"]["izz"]]
-        ),
-        "arm_length": phys["arm_length"],
-        "thrust_coefficient": phys["thrust_coefficient"],
-        "drag_coefficient": phys["drag_coefficient"],
-        "yaw_torque_coefficient": phys["yaw_torque_coefficient"],
-        "gravity": phys["gravity"],
-        "motor_time_constant": phys["motor_time_constant"],
-    }
-    return params, cfg["simulation"]["dt"]
-
-
 @pytest.fixture
 def params():
-    return _load_params_and_dt()[0]
+    return load_config(CONFIG_PATH).physics.as_params()
 
 
 @pytest.fixture
 def dt():
-    return _load_params_and_dt()[1]
+    return load_config(CONFIG_PATH).simulation.dt
 
 
 def _level_state():

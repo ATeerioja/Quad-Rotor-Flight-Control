@@ -1,44 +1,5 @@
-# Default configuration for the QuadHover-v0 environment.
-# All values are placeholders to be tuned once dynamics.py and
-# quad_hover_env.py are implemented (Stage 0 prompts 0.2 / 0.4).
-# No parameter here should ever be hardcoded in the physics or env code --
-# everything the model needs must be read from a config like this one.
-
-physics:
-  mass: 0.5                 # kg
-  inertia:                  # diagonal inertia tensor, kg*m^2
-    ixx: 0.0023
-    iyy: 0.0023
-    izz: 0.004
-  arm_length: 0.17           # m, center to rotor
-  thrust_coefficient: 2.45   # N per unit command; thrust = thrust_coefficient * motor_command.
-                              # Sized so hover (mass*gravity/4 per motor) sits near
-                              # command=0.5, leaving control authority in both directions.
-  drag_coefficient: 0.1      # linear velocity damping
-  yaw_torque_coefficient: 0.01 # yaw reaction torque = yaw_torque_coefficient * thrust
-  gravity: 9.81               # m/s^2
-  motor_time_constant: 0.02   # s, first-order motor lag (not yet used by dynamics.py)
-
-simulation:
-  dt: 0.01                    # s, integration timestep (100 Hz)
-
-episode:
-  max_steps: 1000              # 10 s at 100 Hz
-  crash_altitude: 0.0           # m, episode ends if altitude drops below this
-  max_tilt_deg: 60.0             # deg, episode ends beyond this tilt from upright
-  bounding_box: 5.0                # m, half-width of allowed cube around origin
-
-reward:
-  position_error_weight: 1.0
-  angular_velocity_weight: 0.1
-  action_magnitude_weight: 0.01
-  action_rate_weight: 0.01
-  hover_bonus: 1.0
-  hover_threshold: 0.1          # m, distance to target counted as "hovering"
-  crash_penalty: 100.0
-
-spawn:
-  position_perturbation: 0.2      # m, random spawn offset from target
-  velocity_perturbation: 0.1       # m/s
-  orientation_perturbation_deg: 5.0 # deg
-  target_region: 1.0                 # m, half-width of region target is sampled from
+# Backward-compatible alias for hover.yaml (kept so `config_path=None` /
+# any existing "default.yaml" reference keeps resolving to the full
+# hover-task config: default.yaml -> hover.yaml -> base.yaml).
+defaults:
+  - hover.yaml

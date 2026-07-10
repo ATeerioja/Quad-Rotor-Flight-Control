@@ -1,0 +1,24 @@
+# Base physical/simulation parameters for QuadHover-v0.
+# Root of the config inheritance chain -- no `defaults:` here.
+# All values are placeholders to be tuned once dynamics.py and
+# quad_hover_env.py are implemented (Stage 0 prompts 0.2 / 0.4).
+# No parameter here should ever be hardcoded in the physics or env code --
+# everything the model needs must be read from a config like this one.
+
+physics:
+  mass: 0.5                 # kg
+  inertia:                  # diagonal inertia tensor, kg*m^2
+    ixx: 0.0023
+    iyy: 0.0023
+    izz: 0.004
+  arm_length: 0.17           # m, center to rotor
+  thrust_coefficient: 2.45   # N per unit command; thrust = thrust_coefficient * motor_command.
+                              # Sized so hover (mass*gravity/4 per motor) sits near
+                              # command=0.5, leaving control authority in both directions.
+  drag_coefficient: 0.1      # linear velocity damping
+  yaw_torque_coefficient: 0.01 # yaw reaction torque = yaw_torque_coefficient * thrust
+  gravity: 9.81               # m/s^2
+  motor_time_constant: 0.02   # s, first-order motor lag (not yet used by dynamics.py)
+
+simulation:
+  dt: 0.01                    # s, integration timestep (100 Hz)

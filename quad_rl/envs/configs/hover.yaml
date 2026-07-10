@@ -1,0 +1,34 @@
+# Hover-at-target-position task config for QuadHover-v0. Inherits
+# physics/simulation from base.yaml; adds the episode/reward/spawn/
+# disturbance sections specific to this task.
+defaults:
+  - base.yaml
+
+episode:
+  max_steps: 1000              # 10 s at 100 Hz
+  crash_altitude: 0.0           # m, episode ends if altitude drops below this
+  max_tilt_deg: 60.0             # deg, episode ends beyond this tilt from upright
+  bounding_box: 5.0                # m, half-width of allowed cube around origin
+
+reward:
+  position_error_weight: 1.0
+  angular_velocity_weight: 0.1
+  action_magnitude_weight: 0.01
+  action_rate_weight: 0.01
+  hover_bonus: 1.0
+  hover_threshold: 0.1          # m, distance to target counted as "hovering"
+  crash_penalty: 100.0
+
+spawn:
+  position_perturbation: 0.2      # m, random spawn offset from target
+  velocity_perturbation: 0.1       # m/s
+  orientation_perturbation_deg: 5.0 # deg
+  target_region: 1.0                 # m, half-width of region target is sampled from
+
+# No wind/sensor-noise disturbance yet (that's Stage 1.3) -- both default
+# to a no-op "none" type.
+disturbance:
+  force:
+    type: none
+  observation:
+    type: none

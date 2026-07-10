@@ -43,3 +43,7 @@ randomization:
 # a Dict with a "privileged_obs" key carrying the sampled physics
 # parameters. False here so SB3's MlpPolicy keeps working untouched.
 expose_privileged: false
+
+# Stage 1.5: number of most-recent (unstacked) observations concatenated
+# into the returned "observation". 1 is a no-op (no stacking).
+history_length: 1

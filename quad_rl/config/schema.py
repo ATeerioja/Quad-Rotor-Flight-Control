@@ -288,12 +288,13 @@ class EnvConfig:
     disturbance: DisturbanceConfig
     randomization: RandomizationConfig
     expose_privileged: bool
+    history_length: int
 
     @classmethod
     def from_dict(cls, data: dict) -> "EnvConfig":
         known = {
             "physics", "simulation", "episode", "reward", "spawn",
-            "disturbance", "randomization", "expose_privileged",
+            "disturbance", "randomization", "expose_privileged", "history_length",
         }
         unknown = set(data) - known
         if unknown:
@@ -305,6 +306,9 @@ class EnvConfig:
             raise ValueError(
                 f"EnvConfig.expose_privileged: expected bool, got {type(data['expose_privileged']).__name__}"
             )
+        history_length = data["history_length"]
+        if isinstance(history_length, bool) or not isinstance(history_length, int) or history_length < 1:
+            raise ValueError(f"EnvConfig.history_length: expected a positive int, got {history_length!r}")
         return cls(
             physics=PhysicsConfig.from_dict(data["physics"]),
             simulation=SimConfig.from_dict(data["simulation"]),
@@ -314,6 +318,7 @@ class EnvConfig:
             disturbance=DisturbanceConfig.from_dict(data["disturbance"]),
             randomization=RandomizationConfig.from_dict(data["randomization"]),
             expose_privileged=data["expose_privileged"],
+            history_length=history_length,
         )
 
     def asdict(self) -> dict:
@@ -329,4 +334,5 @@ class EnvConfig:
             "disturbance": self.disturbance.asdict(),
             "randomization": self.randomization.asdict(),
             "expose_privileged": self.expose_privileged,
+            "history_length": self.history_length,
         }

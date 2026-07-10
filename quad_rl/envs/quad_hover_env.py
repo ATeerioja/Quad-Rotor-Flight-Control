@@ -34,6 +34,7 @@ direct instantiation without gym.make()'s TimeLimit wrapper.
 
 from __future__ import annotations
 
+from collections import deque
 from pathlib import Path
 
 import gymnasium as gym
@@ -107,13 +108,21 @@ class QuadHoverEnv(gym.Env):
 
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(dynamics.ACTION_DIM,), dtype=np.float32)
 
+        # history_length=1 is a no-op (the deque always holds exactly the
+        # current frame, concatenation of one array reproduces it exactly)
+        # -- there's no special-cased "no stacking" path, just N=1.
+        self.history_length = self.env_config.history_length
+        self._history: deque[np.ndarray] = deque(maxlen=self.history_length)
+
         # expose_privileged is a static, construction-time setting (not
         # something that changes per-episode), so SB3's MlpPolicy vs.
         # MultiInputPolicy selection can be driven by this observation_space
         # shape alone -- when false, this is a plain Box exactly as before
         # this feature existed.
         self.expose_privileged = self.env_config.expose_privileged
-        plain_obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(OBS_DIM,), dtype=np.float32)
+        plain_obs_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(OBS_DIM * self.history_length,), dtype=np.float32
+        )
         if self.expose_privileged:
             self.observation_space = spaces.Dict({
                 "observation": plain_obs_space,
@@ -171,6 +180,14 @@ class QuadHoverEnv(gym.Env):
         self.force_disturbance = build_force_disturbance(self.env_config.disturbance.force)
         self.observation_noise = build_observation_noise(self.env_config.disturbance.observation)
 
+        # Deque is filled by repeating the initial observation, not zeros
+        # -- zeros would be a valid-looking "at target, level, at rest"
+        # observation and inject a false transient at episode start.
+        initial_obs = self._get_obs()
+        self._history = deque(
+            (initial_obs.copy() for _ in range(self.history_length)), maxlen=self.history_length
+        )
+
         info = {
             "physics_params": self._physics_param_vector,
             "physics_param_names": PHYSICS_PARAM_NAMES,
@@ -218,6 +235,8 @@ class QuadHoverEnv(gym.Env):
         truncated = self.elapsed_steps >= self.env_config.episode.max_steps
         self.prev_action = action
 
+        self._history.append(self._get_obs())
+
         # Exposed for training/eval tooling: train_ppo.py's custom TensorBoard
         # metric averages "within_hover_threshold" over each episode, and
         # eval_rollout.py plots "reward_components" without needing to
@@ -262,10 +281,16 @@ class QuadHoverEnv(gym.Env):
         return self.observation_noise.apply(obs, self.np_random).astype(np.float32, copy=False)
 
     def _make_observation(self) -> np.ndarray | dict:
-        plain_obs = self._get_obs()
+        # Oldest-to-newest concatenation, matching SB3 VecFrameStack's
+        # convention -- the deque's own append/fill logic (reset()/step())
+        # is what actually maintains the window; this just flattens it.
+        stacked_obs = np.concatenate(self._history)
         if not self.expose_privileged:
-            return plain_obs
-        return {"observation": plain_obs, "privileged_obs": self._physics_param_vector}
+            return stacked_obs
+        # privileged_obs is the current episode's ground-truth physics
+        # vector, not a history -- it doesn't change within an episode, so
+        # stacking it would just repeat the same values N times.
+        return {"observation": stacked_obs, "privileged_obs": self._physics_param_vector}
 
 
 gym.register(

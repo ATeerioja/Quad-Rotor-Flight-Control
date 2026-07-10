@@ -43,6 +43,7 @@ from scipy.spatial.transform import Rotation
 
 from quad_rl.config.loader import load_config
 from quad_rl.envs import dynamics
+from quad_rl.envs.disturbances import build_force_disturbance, build_observation_noise
 from quad_rl.envs.rewards import HoverBonus, RewardFunction, StepContext
 
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "configs" / "default.yaml"
@@ -92,6 +93,9 @@ class QuadHoverEnv(gym.Env):
             None,
         )
 
+        self.force_disturbance = build_force_disturbance(self.env_config.disturbance.force)
+        self.observation_noise = build_observation_noise(self.env_config.disturbance.observation)
+
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(dynamics.ACTION_DIM,), dtype=np.float32)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(OBS_DIM,), dtype=np.float32)
 
@@ -129,14 +133,30 @@ class QuadHoverEnv(gym.Env):
         self.prev_action = np.zeros(dynamics.ACTION_DIM)
         self.elapsed_steps = 0
 
+        # Rebuilt fresh each episode (not just once in __init__) since
+        # OrnsteinUhlenbeckWind carries mutable per-episode state (current
+        # value, last t) that should restart cleanly at its mean rather
+        # than carrying over from the previous episode.
+        self.force_disturbance = build_force_disturbance(self.env_config.disturbance.force)
+        self.observation_noise = build_observation_noise(self.env_config.disturbance.observation)
+
         return self._get_obs(), {}
 
     def step(self, action: np.ndarray):
         action = np.clip(np.asarray(action, dtype=float), -1.0, 1.0)
         motor_command = (action + 1.0) / 2.0  # [-1, 1] -> [0, 1]
 
+        # Sampled once per env step (not per RK4 sub-stage) using the
+        # pre-step state and the time elapsed since this episode began,
+        # then zero-order-held across the sub-stages inside dynamics.step
+        # the same way action already is.
+        t = self.elapsed_steps * self.dt
+        external_force = self.force_disturbance.force(self.state, t, self.np_random)
+
         prev_state = self.state
-        self.state = dynamics.step(self.state, motor_command, self.dt, self.physics_params)
+        self.state = dynamics.step(
+            self.state, motor_command, self.dt, self.physics_params, external_force=external_force
+        )
         self.elapsed_steps += 1
 
         pos_error_norm = float(np.linalg.norm(self.state[dynamics.POS] - self.target))
@@ -203,7 +223,7 @@ class QuadHoverEnv(gym.Env):
             omega / ANGULAR_VELOCITY_SCALE,
             self.prev_action,
         ])
-        return obs.astype(np.float32)
+        return self.observation_noise.apply(obs, self.np_random).astype(np.float32, copy=False)
 
 
 gym.register(

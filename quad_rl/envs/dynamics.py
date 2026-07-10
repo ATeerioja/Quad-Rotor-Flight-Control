@@ -23,6 +23,15 @@ no room for per-motor lag state -- so `motor_time_constant` is accepted
 in `params` but currently unused; a future stage can add it either as
 extra state or as an env-level filter.
 
+External force: `step`/`_state_derivative` accept an optional
+`external_force` (3-vector, Newtons, world frame), added to the
+translational dynamics the same way as thrust (`+ external_force / mass`),
+with no torque contribution. `None` by default, so the disturbance seam is
+invisible unless a caller opts in. Held constant across the four RK4
+sub-stages, same zero-order hold as `action`. This module has no knowledge
+of what produces the force (e.g. wind models live in
+quad_rl.envs.disturbances) -- it only ever sees the resulting vector.
+
 Motor mixing: quadrotor X-configuration. Motors are numbered 1-4 as
 front-right, rear-right, rear-left, front-left, each at distance
 `arm_length` from the center of mass at +-45 degrees from the body
@@ -112,7 +121,12 @@ def _motor_mixing(thrusts: np.ndarray, params: dict) -> tuple[float, np.ndarray]
     return total_thrust, np.array([tau_x, tau_y, tau_z])
 
 
-def _state_derivative(state: np.ndarray, action: np.ndarray, params: dict) -> np.ndarray:
+def _state_derivative(
+    state: np.ndarray,
+    action: np.ndarray,
+    params: dict,
+    external_force: np.ndarray | None = None,
+) -> np.ndarray:
     """d(state)/dt for the 13-dim state, given a 4-dim motor command."""
     velocity = state[VEL]
     quat = state[QUAT]
@@ -132,6 +146,8 @@ def _state_derivative(state: np.ndarray, action: np.ndarray, params: dict) -> np
 
     dpos = velocity
     dvel = thrust_world / mass + gravity_world - (drag / mass) * velocity
+    if external_force is not None:
+        dvel = dvel + external_force / mass
 
     omega_quat = np.array([0.0, omega[0], omega[1], omega[2]])
     dquat = 0.5 * quat_multiply(quat, omega_quat)
@@ -147,16 +163,23 @@ def _state_derivative(state: np.ndarray, action: np.ndarray, params: dict) -> np
     return dstate
 
 
-def step(state: np.ndarray, action: np.ndarray, dt: float, params: dict) -> np.ndarray:
+def step(
+    state: np.ndarray,
+    action: np.ndarray,
+    dt: float,
+    params: dict,
+    external_force: np.ndarray | None = None,
+) -> np.ndarray:
     """Advance state by dt using RK4, with action held constant (zero-order
-    hold) across the four RK4 stages. Renormalizes the quaternion after
-    integration, since RK4 does not conserve the unit-quaternion
+    hold) across the four RK4 stages. external_force (if given) is held
+    constant across the stages the same way. Renormalizes the quaternion
+    after integration, since RK4 does not conserve the unit-quaternion
     constraint on its own.
     """
-    k1 = _state_derivative(state, action, params)
-    k2 = _state_derivative(state + 0.5 * dt * k1, action, params)
-    k3 = _state_derivative(state + 0.5 * dt * k2, action, params)
-    k4 = _state_derivative(state + dt * k3, action, params)
+    k1 = _state_derivative(state, action, params, external_force)
+    k2 = _state_derivative(state + 0.5 * dt * k1, action, params, external_force)
+    k3 = _state_derivative(state + 0.5 * dt * k2, action, params, external_force)
+    k4 = _state_derivative(state + dt * k3, action, params, external_force)
 
     next_state = state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
     next_state[QUAT] = quat_normalize(next_state[QUAT])

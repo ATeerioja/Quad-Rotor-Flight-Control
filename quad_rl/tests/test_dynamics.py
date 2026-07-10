@@ -17,6 +17,9 @@ Tests:
     5. Angular momentum conservation: for a torque-free, thrust-free
        case, angular velocity stays constant (no artificial damping
        bugs in the integrator).
+    6. External force: an optional external_force adds a pure
+       translational acceleration with no torque coupling, and omitting
+       it entirely is identical to passing external_force=None.
 """
 
 from pathlib import Path
@@ -137,3 +140,26 @@ def test_angular_velocity_conserved_without_torque(params, dt):
         state = dyn.step(state, action, dt, params)
 
     assert np.allclose(state[dyn.OMEGA], omega0, atol=1e-9)
+
+
+def test_external_force_adds_pure_translational_acceleration(params):
+    state = _level_state()
+    action = np.zeros(4)
+    external_force = np.array([1.0, -2.0, 3.0])
+
+    dstate = dyn._state_derivative(state, action, params, external_force=external_force)
+
+    gravity_term = np.array([0.0, 0.0, -params["gravity"]])
+    expected_dvel = gravity_term + external_force / params["mass"]
+    assert dstate[dyn.VEL] == pytest.approx(expected_dvel, abs=1e-9)
+    assert dstate[dyn.OMEGA] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_external_force_default_none_matches_no_kwarg_call(params):
+    state = _level_state()
+    action = np.zeros(4)
+
+    with_default = dyn._state_derivative(state, action, params, external_force=None)
+    without_kwarg = dyn._state_derivative(state, action, params)
+
+    assert np.array_equal(with_default, without_kwarg)

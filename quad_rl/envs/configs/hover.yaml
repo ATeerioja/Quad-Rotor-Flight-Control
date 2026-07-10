@@ -11,13 +11,13 @@ episode:
   bounding_box: 5.0                # m, half-width of allowed cube around origin
 
 reward:
-  position_error_weight: 1.0
-  angular_velocity_weight: 0.1
-  action_magnitude_weight: 0.01
-  action_rate_weight: 0.01
-  hover_bonus: 1.0
-  hover_threshold: 0.1          # m, distance to target counted as "hovering"
-  crash_penalty: 100.0
+  terms:
+    - {type: position, weight: 1.0}
+    - {type: angular_velocity, weight: 0.1}
+    - {type: action_magnitude, weight: 0.01}
+    - {type: action_rate, weight: 0.01}
+    - {type: hover_bonus, weight: 1.0, threshold: 0.1}  # threshold: m, distance to target counted as "hovering"
+    - {type: crash_penalty, weight: 100.0}
 
 spawn:
   position_perturbation: 0.2      # m, random spawn offset from target

@@ -43,6 +43,7 @@ from scipy.spatial.transform import Rotation
 
 from quad_rl.config.loader import load_config
 from quad_rl.envs import dynamics
+from quad_rl.envs.rewards import HoverBonus, RewardFunction, StepContext
 
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "configs" / "default.yaml"
 
@@ -80,6 +81,16 @@ class QuadHoverEnv(gym.Env):
         # the hot per-step path.
         self.physics_params = self.env_config.physics.as_params()
         self.dt = self.env_config.simulation.dt
+
+        self.reward_function = RewardFunction.from_config(self.env_config.reward)
+        # within_hover_threshold is a general diagnostic (read by
+        # train_ppo.py's HoverFractionCallback), not itself a reward term,
+        # so it's derived from whichever hover_bonus term is configured --
+        # if the config has none, it just reports False rather than raising.
+        self._hover_threshold = next(
+            (t.threshold for t in self.reward_function.terms if isinstance(t, HoverBonus)),
+            None,
+        )
 
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(dynamics.ACTION_DIM,), dtype=np.float32)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(OBS_DIM,), dtype=np.float32)
@@ -124,25 +135,30 @@ class QuadHoverEnv(gym.Env):
         action = np.clip(np.asarray(action, dtype=float), -1.0, 1.0)
         motor_command = (action + 1.0) / 2.0  # [-1, 1] -> [0, 1]
 
+        prev_state = self.state
         self.state = dynamics.step(self.state, motor_command, self.dt, self.physics_params)
         self.elapsed_steps += 1
 
         pos_error_norm = float(np.linalg.norm(self.state[dynamics.POS] - self.target))
-        within_hover_threshold = pos_error_norm < self.env_config.reward.hover_threshold
+        within_hover_threshold = (
+            self._hover_threshold is not None and pos_error_norm < self._hover_threshold
+        )
 
+        crashed = self._check_crash()
+        ctx = StepContext(
+            state=self.state,
+            prev_state=prev_state,
+            action=action,
+            prev_action=self.prev_action,
+            target=self.target,
+            dt=self.dt,
+            crashed=crashed,
+        )
         # reward_components always has the same keys regardless of crash,
         # so callers (e.g. eval_rollout.py) can stack a fixed set of series
         # across an episode without ragged per-step dicts.
-        reward, reward_components = self._compute_reward(action, pos_error_norm)
-        crashed = self._check_crash()
-        if crashed:
-            crash_penalty = self.env_config.reward.crash_penalty
-            reward = -crash_penalty
-            reward_components = {**{k: 0.0 for k in reward_components}, "crash_penalty": -crash_penalty}
-            terminated = True
-        else:
-            reward_components["crash_penalty"] = 0.0
-            terminated = False
+        reward, reward_components = self.reward_function(ctx)
+        terminated = crashed
 
         truncated = self.elapsed_steps >= self.env_config.episode.max_steps
         self.prev_action = action
@@ -156,19 +172,6 @@ class QuadHoverEnv(gym.Env):
             "reward_components": reward_components,
         }
         return self._get_obs(), reward, terminated, truncated, info
-
-    def _compute_reward(self, action: np.ndarray, pos_error_norm: float) -> tuple[float, dict]:
-        omega = self.state[dynamics.OMEGA]
-        reward_cfg = self.env_config.reward
-
-        components = {
-            "position": -reward_cfg.position_error_weight * pos_error_norm,
-            "angular_velocity": -reward_cfg.angular_velocity_weight * np.linalg.norm(omega),
-            "action_magnitude": -reward_cfg.action_magnitude_weight * np.linalg.norm(action),
-            "action_rate": -reward_cfg.action_rate_weight * np.linalg.norm(action - self.prev_action),
-            "hover_bonus": reward_cfg.hover_bonus if pos_error_norm < reward_cfg.hover_threshold else 0.0,
-        }
-        return sum(components.values()), components
 
     def _check_crash(self) -> bool:
         episode_cfg = self.env_config.episode

@@ -84,20 +84,33 @@ class EpisodeConfig:
 
 @dataclasses.dataclass(frozen=True)
 class RewardConfig:
-    position_error_weight: float
-    angular_velocity_weight: float
-    action_magnitude_weight: float
-    action_rate_weight: float
-    hover_bonus: float
-    hover_threshold: float
-    crash_penalty: float
+    """A list of {type, weight, ...extra} term configs, e.g.
+    {"type": "hover_bonus", "weight": 1.0, "threshold": 0.1}. Only
+    shallowly validated here (must be a list of dicts with a "type" key) --
+    deeper per-type validation happens when quad_rl.envs.rewards builds
+    concrete term instances via REWARD_REGISTRY."""
+
+    terms: list[dict]
 
     @classmethod
     def from_dict(cls, data: dict) -> "RewardConfig":
-        return _validate_and_build(cls, data)
+        known = {"terms"}
+        unknown = set(data) - known
+        if unknown:
+            raise ValueError(f"RewardConfig: unknown key(s): {sorted(unknown)}")
+        if "terms" not in data:
+            raise ValueError("RewardConfig: missing required key(s): ['terms']")
+
+        terms = data["terms"]
+        if not isinstance(terms, list):
+            raise ValueError("RewardConfig.terms: expected a list")
+        for i, term in enumerate(terms):
+            if not isinstance(term, dict) or "type" not in term:
+                raise ValueError(f"RewardConfig.terms[{i}]: must be a dict with a 'type' key")
+        return cls(terms=[dict(t) for t in terms])
 
     def asdict(self) -> dict:
-        return dataclasses.asdict(self)
+        return {"terms": [dict(t) for t in self.terms]}
 
 
 @dataclasses.dataclass(frozen=True)

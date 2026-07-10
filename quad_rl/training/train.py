@@ -42,12 +42,14 @@ import argparse
 from pathlib import Path
 
 import gymnasium as gym
+import yaml
 from gymnasium import spaces
 from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
-from quad_rl.config.loader import apply_overrides, load_raw_config
+from quad_rl.config.loader import apply_overrides, load_config, load_raw_config
+from quad_rl.envs.quad_hover_env import DEFAULT_CONFIG_PATH
 from quad_rl.training.algorithms import ALGO_REGISTRY
 from quad_rl.training.callbacks import EpisodeMetricsCallback, HoverFractionCallback
 
@@ -107,6 +109,11 @@ def train(args: argparse.Namespace):
         hyperparams = apply_overrides(spec.default_hyperparams, algo_overrides)
     hyperparams = spec.build_kwargs(hyperparams)
 
+    # Resolved once here (in addition to each vec-env worker resolving it
+    # again independently via gym.make) purely so it can be dumped for
+    # reproducibility -- see run_dir/config.yaml below.
+    env_config = load_config(args.env_config or DEFAULT_CONFIG_PATH, overrides=env_overrides)
+
     vec_env_cls = SubprocVecEnv if args.vec_env == "subproc" else DummyVecEnv
     vec_env = build_vec_env(
         args.n_envs, args.seed, vec_env_cls, args.env_config, env_overrides,
@@ -117,6 +124,17 @@ def train(args: argparse.Namespace):
     checkpoint_dir = run_dir / "checkpoints"
     tensorboard_dir = RUNS_DIR / "tensorboard"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    # Written before training starts (not after) so a crashed/interrupted
+    # run still leaves a config.yaml next to whatever checkpoints exist.
+    # This is what evaluate.py (Stage 1.7) reads back --algo and the env
+    # config from, rather than requiring them to be passed as flags again.
+    with open(run_dir / "config.yaml", "w") as f:
+        yaml.safe_dump(
+            {"algo": args.algo, "algo_hyperparams": hyperparams, "env": env_config.asdict()},
+            f,
+            sort_keys=False,
+        )
 
     # Driven by the env's actual observation_space, not a separate flag
     # that could disagree with it (Stage 1.4's expose_privileged is what

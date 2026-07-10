@@ -43,6 +43,7 @@ from gymnasium import spaces
 from scipy.spatial.transform import Rotation
 
 from quad_rl.config.loader import load_config
+from quad_rl.config.schema import EnvConfig
 from quad_rl.envs import dynamics
 from quad_rl.envs.disturbances import build_force_disturbance, build_observation_noise
 from quad_rl.envs.randomization import PHYSICS_PARAM_NAMES, ParameterSampler, physics_config_to_vector
@@ -74,10 +75,18 @@ class QuadHoverEnv(gym.Env):
         config_path: str | Path | None = None,
         overrides: list[str] | None = None,
         render_mode: str | None = None,
+        env_config: EnvConfig | None = None,
     ):
         self.render_mode = render_mode
 
-        self.env_config = load_config(config_path or DEFAULT_CONFIG_PATH, overrides=overrides)
+        # env_config lets a caller pass an already-resolved config directly
+        # (e.g. evaluate.py reconstructing a training run's exact config
+        # from its dumped config.yaml via EnvConfig.from_dict) rather than
+        # only ever loading fresh from a YAML path. When given, config_path
+        # and overrides are ignored.
+        self.env_config = env_config if env_config is not None else load_config(
+            config_path or DEFAULT_CONFIG_PATH, overrides=overrides
+        )
 
         self.dt = self.env_config.simulation.dt
 
